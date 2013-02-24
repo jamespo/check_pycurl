@@ -1,0 +1,51 @@
+check_pycurl
+
+INTRODUCTION
+
+A nagios / icinga / shinken plugin to check HTTP requests
+
+Written in python. Licensed under GPL v3
+
+
+
+DEPENDENCIES
+
+python 2.x
+pycurl
+
+
+USAGE
+
+Usage: check_pycurl [options]
+
+Options:
+  -h, --help            show this help message and exit
+  --url=URL             
+  --test=TEST           [code:HTTPCODE|regex:REGEX]
+  --connect-timeout=CONNECTTIMEOUT
+  --timeout=TIMEOUT     
+  --proxy=PROXY         
+  --location            Follow redirects
+  --insecure            
+
+By default check_pycurl will test for HTTP 200 code (--test code:200)
+
+An alternate test is for presence of regex in the output (--test regex:t.st)
+
+
+CONFIGURATION
+
+# simple configuration just for HTTP 200 check 
+define command {
+	command_name	check_pycurl
+	command_line	/usr/local/nagios/plugins/check_pycurl --url $ARG1$
+}
+
+# host check
+define service {
+        use                             generic-service
+        host_name                       local2
+        service_description             BBC web check
+        check_command                   check_pycurl!http://www.bbc.co.uk
+}
+

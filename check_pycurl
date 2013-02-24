@@ -1,0 +1,84 @@
+#!/usr/bin/python
+
+# check_pycurl ; -*-Python-*-
+# Copyright James Powell 2013 / jamespo [at] gmail [dot] com
+# This program is distributed under the terms of the GNU General Public License v3
+
+import pycurl
+import cStringIO
+import sys
+import re
+from optparse import OptionParser
+
+class CheckPyCurl(object):
+    def __init__(self, options):
+        self.options = options
+	self.results = dict()
+	[self.successtest, self.successcheck] = options.test.split(':')	
+
+    def curl(self):
+	buf = cStringIO.StringIO()
+	c = pycurl.Curl()
+	c.setopt(c.URL, self.options.url)
+	c.setopt(c.CONNECTTIMEOUT, self.options.connecttimeout)
+	c.setopt(c.TIMEOUT, self.options.timeout)
+	c.setopt(c.FOLLOWLOCATION, self.options.location)
+	c.setopt(c.SSL_VERIFYPEER, self.options.insecure)
+	if self.options.proxy is not None:
+	    c.setopt(c.PROXY, self.options.proxy)
+	c.setopt(c.WRITEFUNCTION, buf.write)
+	try:
+	    c.perform()
+	    self.results['rc'] = 0
+	    self.results['status'] = "%s returned HTTP %s" % (self.options.url,
+							      c.getinfo(pycurl.HTTP_CODE))
+	    # check results
+	    if self.successtest == 'code':
+		if int(self.successcheck) != int(c.getinfo(pycurl.HTTP_CODE)):
+		    self.results['rc'] = 2
+	    elif self.successtest == 'regex':
+		if re.search(self.successcheck, self.content) is not None:
+		    self.results['status'] = "%s found in %s" % (self.successcheck,
+								 self.options.url)
+		    self.results['rc'] = 0
+		else:
+		    self.results['status'] = "%s not found in %s" % (self.successcheck,
+								     self.options.url)
+		    self.results['rc'] = 2
+	    else:
+		self.results['rc'] = 1
+	except pycurl.error, excep:
+	    self.results['rc'] = 2
+	    self.results['status'] = excep[1]
+	    
+	#self.content = buf.getvalue()
+	buf.close()
+
+	self.results['totaltime'] = c.getinfo(pycurl.TOTAL_TIME)
+	return self.results['rc']
+
+def main():
+    parser = OptionParser()
+    parser.add_option("--url", dest="url")
+    parser.add_option("--test", dest="test",
+		      default="code:200", help="[code:HTTPCODE|regex:REGEX]")
+    parser.add_option("--connect-timeout", dest="connecttimeout",
+		      default=5)
+    parser.add_option("--timeout", dest="timeout",
+		      default=10)
+    parser.add_option("--proxy", dest="proxy")
+    parser.add_option("--location", help="Follow redirects",
+		      dest="location", action="store_true", default=False)
+    parser.add_option("--insecure", dest="insecure", action="store_true",
+		      default=False)
+    
+    (options, args) = parser.parse_args()
+    cpc = CheckPyCurl(options)
+    rc = cpc.curl()
+    rcstr = 'OK:' if rc == 0 else 'CRITICAL:'
+    print rcstr, cpc.results['status']
+    sys.exit(rc)
+
+if __name__ == '__main__':
+    main()
+
