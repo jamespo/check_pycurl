@@ -8,7 +8,53 @@ import pycurl
 import cStringIO
 import sys
 import re
+import yaml
 from optparse import OptionParser
+
+class CheckPyCurlOptions(object):
+    '''class to contain check options for multi-mode'''
+    def __init__(self):
+       pass
+
+class CheckPyCurlMulti(object):
+    def __init__(self, runfile):
+        self.runfile = runfile
+        self.checkobjs = []
+
+    def parse_runfile(self):
+        with open(self.runfile) as f:
+            runyaml = yaml.load(f)
+            # print runyaml
+        # loop round urls in object & create checkobjects
+        for url in runyaml['urls']:
+            check_opt = CheckPyCurlOptions()
+            for opt in url:
+                setattr(check_opt, opt, url[opt])
+            # set defaults if not present (TODO: set these in one place)
+            if not getattr(check_opt, 'test', None):
+                setattr(check_opt, 'test', 'code:200')
+            if not getattr(check_opt, 'connecttimeout', None):
+                setattr(check_opt, 'connecttimeout', 5)
+            if not getattr(check_opt, 'timeout', None):
+                setattr(check_opt, 'timeout', 10)
+            if not getattr(check_opt, 'location', None):
+                setattr(check_opt, 'location', False)
+            if not getattr(check_opt, 'insecure', None):
+                setattr(check_opt, 'insecure', False)
+            if not getattr(check_opt, 'proxy', None):
+                setattr(check_opt, 'proxy', '')
+            # add checkobject to list
+            self.checkobjs.append(check_opt)
+
+    def check_runfile(self):
+        cpc = None
+        for (counter, checkobj) in enumerate(self.checkobjs):
+            cpc = CheckPyCurl(checkobj)
+            rc = cpc.curl()
+            cpc.results['stage'] = counter
+            if rc != 0:
+                return cpc
+        return cpc
 
 class CheckPyCurl(object):
     def __init__(self, options):
@@ -36,17 +82,17 @@ class CheckPyCurl(object):
             if self.successtest == 'code':
                 if int(self.successcheck) != int(c.getinfo(pycurl.HTTP_CODE)):
                     self.results['rc'] = 2
-                elif self.successtest == 'regex':
-                    if re.search(self.successcheck, self.content) is not None:
-                        self.results['status'] = "%s found in %s" % (self.successcheck,
-                                             self.options.url)
-                        self.results['rc'] = 0
-                    else:
-                        self.results['status'] = "%s not found in %s" % (self.successcheck,
-                                                 self.options.url)
-                        self.results['rc'] = 2
+            elif self.successtest == 'regex':
+                if re.search(self.successcheck, self.content) is not None:
+                    self.results['status'] = "%s found in %s" % (self.successcheck,
+                                         self.options.url)
+                    self.results['rc'] = 0
                 else:
-                    self.results['rc'] = 1
+                    self.results['status'] = "%s not found in %s" % (self.successcheck,
+                                             self.options.url)
+                    self.results['rc'] = 2
+            else:
+                self.results['rc'] = 1
         except pycurl.error, excep:
             self.results['rc'] = 2
             self.results['status'] = excep[1]
@@ -58,15 +104,17 @@ class CheckPyCurl(object):
         return self.results['rc']
 
 def checkargs(options):
-    if options.url is None:
+    if options.url is None and options.runfile is None:
         # 3 is return code for unknown for NRPE plugin
-        return (3, 'No URL supplied')
+        return (3, 'No URL / runfile supplied')
+    # TODO: check if runfile exists
     else:
         return (0, '')
 
 def main():
     parser = OptionParser()
     parser.add_option("-u", "--url", dest="url")
+    parser.add_option("--runfile", dest="runfile")
     parser.add_option("--test", dest="test",
               default="code:200", help="[code:HTTPCODE|regex:REGEX]")
     parser.add_option("--connect-timeout", dest="connecttimeout",
@@ -80,11 +128,24 @@ def main():
               default=False)
     (options, args) = parser.parse_args()
     (rc, rcstr) = checkargs(options)
+
     if rc != 3:
-        cpc = CheckPyCurl(options)
-        rc = cpc.curl()
-        rcstr = 'OK:' if rc == 0 else 'CRITICAL:'
-        rcstr = rcstr + ' ' + cpc.results['status']
+        if options.url is not None:
+            cpc = CheckPyCurl(options)
+            rc = cpc.curl()
+            rcstr = 'OK:' if rc == 0 else 'CRITICAL:'
+            rcstr = rcstr + ' ' + cpc.results['status']
+        else:
+            # runfile
+            a = CheckPyCurlMulti(options.runfile)
+            a.parse_runfile()
+            cpc = a.check_runfile()
+            rc = cpc.results['rc']
+            if rc == 0:
+                rcstr = 'OK: All stages passed'
+            else:
+                rcstr = 'CRITICAL: Stage %s - %s (should be %s)' % \
+                (cpc.results['stage'], cpc.results['status'], cpc.options.test)
     print rcstr
     sys.exit(rc)
 
