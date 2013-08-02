@@ -14,7 +14,13 @@ from optparse import OptionParser
 class CheckPyCurlOptions(object):
     '''class to contain check options for multi-mode'''
     def __init__(self):
-       pass
+        # set defaults if not present (TODO: set these in one place)
+        self.test = 'code:200'
+        self.connecttimeout = 5
+        self.timeout = 10
+        self.location = False
+        self.insecure = False
+        self.proxy = ''
 
 class CheckPyCurlMulti(object):
     def __init__(self, runfile):
@@ -30,20 +36,6 @@ class CheckPyCurlMulti(object):
             check_opt = CheckPyCurlOptions()
             for opt in url:
                 setattr(check_opt, opt, url[opt])
-            # set defaults if not present (TODO: set these in one place)
-            if not getattr(check_opt, 'test', None):
-                setattr(check_opt, 'test', 'code:200')
-            if not getattr(check_opt, 'connecttimeout', None):
-                setattr(check_opt, 'connecttimeout', 5)
-            if not getattr(check_opt, 'timeout', None):
-                setattr(check_opt, 'timeout', 10)
-            if not getattr(check_opt, 'location', None):
-                setattr(check_opt, 'location', False)
-            if not getattr(check_opt, 'insecure', None):
-                setattr(check_opt, 'insecure', False)
-            if not getattr(check_opt, 'proxy', None):
-                setattr(check_opt, 'proxy', '')
-            # add checkobject to list
             self.checkobjs.append(check_opt)
 
     def check_runfile(self):
@@ -114,7 +106,7 @@ def checkargs(options):
 def main():
     parser = OptionParser()
     parser.add_option("-u", "--url", dest="url")
-    parser.add_option("--runfile", dest="runfile")
+    parser.add_option("-f", "--runfile", dest="runfile")
     parser.add_option("--test", dest="test",
               default="code:200", help="[code:HTTPCODE|regex:REGEX]")
     parser.add_option("--connect-timeout", dest="connecttimeout",
