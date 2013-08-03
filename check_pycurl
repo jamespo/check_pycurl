@@ -10,6 +10,7 @@ import uuid
 import sys
 import re
 import yaml
+import urllib
 from optparse import OptionParser
 
 class CheckPyCurlOptions(object):
@@ -21,7 +22,8 @@ class CheckPyCurlOptions(object):
         self.timeout = 10
         self.location = False
         self.insecure = False
-        self.proxy = ''
+        self.proxy = None
+        self.postdata = None
 
 
 class CheckPyCurlMulti(object):
@@ -69,19 +71,38 @@ class CheckPyCurl(object):
         self.results = dict()
         [self.successtest, self.successcheck] = options.test.split(':')
 
-    def curl(self):
-        buf = cStringIO.StringIO()
+    def create_curl_obj(self):
+        '''create pycurl object & set options'''
         c = pycurl.Curl()
         c.setopt(c.URL, self.options.url)
         c.setopt(c.CONNECTTIMEOUT, self.options.connecttimeout)
         c.setopt(c.TIMEOUT, self.options.timeout)
         c.setopt(c.FOLLOWLOCATION, self.options.location)
         c.setopt(c.SSL_VERIFYPEER, self.options.insecure)
-        if getattr(self.options, 'cookiejar', None) is not None:
-            print self.options.tmpfile
+        if getattr(self.options, 'cookiejar', False):
+            print 'cookiejar ' + self.options.tmpfile
+            c.setopt(pycurl.COOKIEJAR, self.options.tmpfile)
+            c.setopt(pycurl.COOKIEFILE, self.options.tmpfile)
         if self.options.proxy is not None:
             c.setopt(c.PROXY, self.options.proxy)
+        # if a POST, set up options
+        if getattr(self.options, 'postdata', None) is not None:
+            post_params = []
+            # split out post param & value and append to postitems
+            for item in self.options.postdata:
+                post_params.append(tuple(item.split(':', 1)))
+            resp_data = urllib.urlencode(post_params)
+            c.setopt(pycurl.POSTFIELDS, resp_data)
+            c.setopt(pycurl.POST, 1)
+        return c
+
+    def curl(self):
+        '''make the request'''
+        buf = cStringIO.StringIO()
+        # create object & set options
+        c = self.create_curl_obj()
         c.setopt(c.WRITEFUNCTION, buf.write)
+        # send the request
         try:
             c.perform()
             self.results['rc'] = 0
@@ -160,4 +181,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
