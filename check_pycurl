@@ -42,17 +42,20 @@ class CheckPyCurlMulti(object):
             runyaml = yaml.load(f)
             # print runyaml
         # set global prefs
-        cookie = False
-        if 'cookiejar' in runyaml:
-            if runyaml['cookiejar'] != 'no': cookie = True
-            CheckPyCurlOptions.tmpfile = self.tmpfile()
-        setattr(CheckPyCurlOptions, 'cookiejar', cookie)
-        # loop round urls in object & create checkobjects
-        for url in runyaml['urls']:
-            check_opt = CheckPyCurlOptions()
-            for opt in url:
-                setattr(check_opt, opt, url[opt])
-            self.checkobjs.append(check_opt)
+        for global_opt in runyaml:
+            if global_opt == 'cookiejar':
+                if runyaml['cookiejar'] != 'no':
+                    CheckPyCurlOptions.tmpfile = self.tmpfile()
+                    CheckPyCurlOptions.cookiejar = True
+            elif global_opt == 'urls':
+                # loop round urls in object & create checkobjects
+                for url in runyaml['urls']:
+                    check_opt = CheckPyCurlOptions()
+                    for opt in url:
+                        setattr(check_opt, opt, url[opt])
+                    self.checkobjs.append(check_opt)
+            else:
+                setattr(CheckPyCurlOptions, global_opt, runyaml[global_opt])
 
     def check_runfile(self):
         '''run check objects'''
@@ -80,7 +83,6 @@ class CheckPyCurl(object):
         c.setopt(c.FOLLOWLOCATION, self.options.location)
         c.setopt(c.SSL_VERIFYPEER, self.options.insecure)
         if getattr(self.options, 'cookiejar', False):
-            print 'cookiejar ' + self.options.tmpfile
             c.setopt(pycurl.COOKIEJAR, self.options.tmpfile)
             c.setopt(pycurl.COOKIEFILE, self.options.tmpfile)
         if self.options.proxy is not None:
@@ -105,6 +107,9 @@ class CheckPyCurl(object):
         # send the request
         try:
             c.perform()
+            # c.close()
+            self.content = buf.getvalue()
+            # print self.content
             self.results['rc'] = 0
             self.results['status'] = "%s returned HTTP %s" % (self.options.url,
                                       c.getinfo(pycurl.HTTP_CODE))
@@ -113,7 +118,8 @@ class CheckPyCurl(object):
                 if int(self.successcheck) != int(c.getinfo(pycurl.HTTP_CODE)):
                     self.results['rc'] = 2
             elif self.successtest == 'regex':
-                if re.search(self.successcheck, self.content) is not None:
+                # TODO: fix this
+                if re.search(self.successcheck, self.content, re.MULTILINE) is not None:
                     self.results['status'] = "%s found in %s" % (self.successcheck,
                                          self.options.url)
                     self.results['rc'] = 0
