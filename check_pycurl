@@ -11,6 +11,7 @@ import sys
 import re
 import yaml
 import urllib
+import os
 from optparse import OptionParser
 
 class CheckPyCurlOptions(object):
@@ -36,6 +37,13 @@ class CheckPyCurlMulti(object):
         '''return temporary filename'''
         return "%s%s" % ('/tmp/check_pycurl_', str(uuid.uuid4()))
 
+    @staticmethod
+    def rm_tmpfile():
+        '''remove cookiejar file if it exists'''
+        if getattr(CheckPyCurlOptions, 'tmpfile', False) and os.path.exists(CheckPyCurlOptions.tmpfile):
+            # print 'removing file'
+            os.remove(CheckPyCurlOptions.tmpfile)
+
     def parse_runfile(self):
         '''parse runfile & create check objects'''
         with open(self.runfile) as f:
@@ -60,19 +68,26 @@ class CheckPyCurlMulti(object):
     def check_runfile(self):
         '''run check objects'''
         cpc = None
+        search_results = {}
         for (counter, checkobj) in enumerate(self.checkobjs):
-            cpc = CheckPyCurl(checkobj)
+            cpc = CheckPyCurl(options=checkobj, prev_matches=search_results)
             rc = cpc.curl()
             cpc.results['stage'] = counter
             if rc != 0:
+                self.rm_tmpfile()
                 return cpc
+            # store regex match results for later use if available
+            if cpc.results.get('search_res', None) is not None:
+                search_results[counter] = cpc.results['search_res']
+        self.rm_tmpfile()
         return cpc
 
 class CheckPyCurl(object):
-    def __init__(self, options):
+    def __init__(self, options, prev_matches = {}):
         self.options = options
         self.results = dict()
-        [self.successtest, self.successcheck] = options.test.split(':')
+        self.prev_matches = prev_matches
+        (self.successtest, self.successcheck) = options.test.split(':')
 
     def create_curl_obj(self):
         '''create pycurl object & set options'''
@@ -92,7 +107,13 @@ class CheckPyCurl(object):
             post_params = []
             # split out post param & value and append to postitems
             for item in self.options.postdata:
-                post_params.append(tuple(item.split(':', 1)))
+                # post_params.append(tuple(item.split(':', 1)))
+                (postname, postdata) = item.split(':', 1)
+                # find if data is actually a lookup to previous match and if so substitute in
+                check_postdata = re.match(r'PREV_MATCH_(\d+)$', postdata)
+                if check_postdata is not None:
+                    postdata = self.prev_matches[int(check_postdata.group(1))].group(1)
+                post_params.append((postname, postdata))
             resp_data = urllib.urlencode(post_params)
             c.setopt(pycurl.POSTFIELDS, resp_data)
             c.setopt(pycurl.POST, 1)
@@ -107,7 +128,6 @@ class CheckPyCurl(object):
         # send the request
         try:
             c.perform()
-            # c.close()
             self.content = buf.getvalue()
             # print self.content
             self.results['rc'] = 0
@@ -118,11 +138,13 @@ class CheckPyCurl(object):
                 if int(self.successcheck) != int(c.getinfo(pycurl.HTTP_CODE)):
                     self.results['rc'] = 2
             elif self.successtest == 'regex':
-                # TODO: fix this
-                if re.search(self.successcheck, self.content, re.MULTILINE) is not None:
+                search_res = re.search(self.successcheck, self.content, re.MULTILINE)
+                if  search_res is not None:
                     self.results['status'] = "%s found in %s" % (self.successcheck,
                                          self.options.url)
                     self.results['rc'] = 0
+                    # store match result for possible later use
+                    self.results['search_res'] = search_res
                 else:
                     self.results['status'] = "%s not found in %s" % (self.successcheck,
                                              self.options.url)
@@ -133,7 +155,6 @@ class CheckPyCurl(object):
             self.results['rc'] = 2
             self.results['status'] = excep[1]
 
-        #self.content = buf.getvalue()
         buf.close()
 
         self.results['totaltime'] = c.getinfo(pycurl.TOTAL_TIME)
@@ -147,21 +168,25 @@ def checkargs(options):
     else:
         return (0, '')
 
-def main():
+def get_cli_options():
     parser = OptionParser()
     parser.add_option("-u", "--url", dest="url")
     parser.add_option("-f", "--runfile", dest="runfile")
     parser.add_option("--test", dest="test",
-              default="code:200", help="[code:HTTPCODE|regex:REGEX]")
+                      default="code:200", help="[code:HTTPCODE|regex:REGEX]")
     parser.add_option("--connect-timeout", dest="connecttimeout",
-              default=5)
+                      default=5)
     parser.add_option("--timeout", dest="timeout",
-              default=10)
+                      default=10)
     parser.add_option("--proxy", dest="proxy")
     parser.add_option("--location", help="Follow redirects",
-              dest="location", action="store_true", default=False)
+                      dest="location", action="store_true", default=False)
     parser.add_option("--insecure", dest="insecure", action="store_true",
-              default=False)
+                      default=False)
+    return parser
+
+def main():
+    parser = get_cli_options()
     (options, args) = parser.parse_args()
     (rc, rcstr) = checkargs(options)
 
