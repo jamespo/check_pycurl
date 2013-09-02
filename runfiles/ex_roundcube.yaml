@@ -1,0 +1,44 @@
+# an example check_pycurl runfile to log in to a roundcube webmail server
+#
+# in the global variables at the top the cookiejar is enabled (this is a
+# feature of curl / pycurl to store cookies between requests, check_pycurl
+# will create this under /tmp and automatically remove it when done)
+#
+# the main test has 3 steps:
+# 0 get login page (and retrieve token for storage)
+# 1 post to login page
+# 2 retrieve inbox page
+#
+# step 0 has a test regex that stores the token
+# step 1 includes the postdata item that contains all the POST fields
+# notably this includes a special field for _token, PREV_MATCH_0_1
+# This uses the match object from step 0, group match 1 (group match 0
+# would be the whole match object
+# step 3 just does a simple check on the inbox url to check if
+# successfully logged in
+---
+cookiejar: yes
+
+urls:
+  - url: https://myrcwebmail.net/roundcube/
+    test: regex:name="_token" value="([^"]+)"
+    connecttimeout: 15
+    timeout: 20
+  - url: https://myrcwebmail.net/roundcube/
+    test: code:302
+    connecttimeout: 15
+    timeout: 20
+    postdata: 
+      - _task:login
+      - _action:login
+      - _user:jp
+      - _pass:SecUURe3P4ss!
+      - _token:PREV_MATCH_0_1
+      - _timezone:Europe/London
+      - _url:rcmloginurl
+  - url: https://myrcwebmail.net/roundcube/?_task=mail
+    test: regex:Inbox
+    connecttimeout: 15
+    timeout: 20
+
+
