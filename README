@@ -83,6 +83,6 @@ define service {
         use                             generic-service
         host_name                       local2
         service_description             Roundcube Login Check
-        check_command                   check_pycurl_f!/opt/nagios/pyc_rf/rc.yml
+        check_command                   check_pycurl_rf!/opt/nagios/pyc_rf/rc.yml
 }
 
