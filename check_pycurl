@@ -110,9 +110,11 @@ class CheckPyCurl(object):
                 # post_params.append(tuple(item.split(':', 1)))
                 (postname, postdata) = item.split(':', 1)
                 # find if data is actually a lookup to previous match and if so substitute in
-                check_postdata = re.match(r'PREV_MATCH_(\d+)$', postdata)
+                check_postdata = re.match(r'PREV_MATCH_(\d+)_(\d+)$', postdata)
                 if check_postdata is not None:
-                    postdata = self.prev_matches[int(check_postdata.group(1))].group(1)
+                    (url_match_stage, url_match_num) = (int(check_postdata.group(1)),
+                                                        int(check_postdata.group(2)))
+                    postdata = self.prev_matches[url_match_stage].group(url_match_num)
                 post_params.append((postname, postdata))
             resp_data = urllib.urlencode(post_params)
             c.setopt(pycurl.POSTFIELDS, resp_data)

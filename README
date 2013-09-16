@@ -64,11 +64,25 @@ define command {
 	command_line	/usr/local/nagios/plugins/check_pycurl --url $ARG1$
 }
 
+# configuration to use runfiles
+define command {
+	command_name	check_pycurl_rf
+	command_line	/usr/local/nagios/plugins/check_pycurl -f $ARG1$
+}
+
 # host check
 define service {
         use                             generic-service
         host_name                       local2
         service_description             BBC web check
         check_command                   check_pycurl!http://www.bbc.co.uk
+}
+
+# runfile check
+define service {
+        use                             generic-service
+        host_name                       local2
+        service_description             Roundcube Login Check
+        check_command                   check_pycurl_f!/opt/nagios/pyc_rf/rc.yml
 }
 
