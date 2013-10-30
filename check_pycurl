@@ -83,7 +83,9 @@ class CheckPyCurlMulti(object):
         return cpc
 
 class CheckPyCurl(object):
-    def __init__(self, options, prev_matches = {}):
+    def __init__(self, options, prev_matches = None):
+        if prev_matches is None:
+            prev_matches = {}
         self.options = options
         self.results = dict()
         self.prev_matches = prev_matches
