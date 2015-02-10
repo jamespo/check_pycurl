@@ -69,10 +69,13 @@ class CheckPyCurlMulti(object):
         '''run check objects'''
         cpc = None
         search_results = {}
+        total_req_time = 0
         for (counter, checkobj) in enumerate(self.checkobjs):
             cpc = CheckPyCurl(options=checkobj, prev_matches=search_results)
             rc = cpc.curl()
             cpc.results['stage'] = counter
+            total_req_time += cpc.results['totaltime'] # store running total of req time
+            cpc.results['totaltime'] = total_req_time
             if rc != 0:
                 self.rm_tmpfile()
                 return cpc
@@ -173,6 +176,7 @@ def checkargs(options):
         return (0, '')
 
 def get_cli_options():
+    '''get command line options & return OptionParser'''
     parser = OptionParser()
     parser.add_option("-u", "--url", dest="url")
     parser.add_option("-f", "--runfile", dest="runfile")
@@ -199,7 +203,7 @@ def main():
             cpc = CheckPyCurl(options)
             rc = cpc.curl()
             rcstr = 'OK:' if rc == 0 else 'CRITICAL:'
-            rcstr = rcstr + ' ' + cpc.results['status']
+            rcstr = rcstr + ' ' + cpc.results['status'] + " | request_time=" + str(cpc.results['totaltime'])
         else:
             # runfile
             a = CheckPyCurlMulti(options.runfile)
@@ -211,6 +215,7 @@ def main():
             else:
                 rcstr = 'CRITICAL: Stage %s - %s (should be %s)' % \
                 (cpc.results['stage'], cpc.results['status'], cpc.options.test)
+            rcstr += " | request_time=" + str(cpc.results['totaltime'])
     print rcstr
     sys.exit(rc)
 
