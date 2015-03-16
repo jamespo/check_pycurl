@@ -1,0 +1,8 @@
+---
+failaterror: False
+
+urls:
+  - url: http://www.bbc.co.uk
+  - url: http://www.bbc.co.uk/doesntexist
+  - url: https://www.bbc.co.uk
+    test: code:301
