@@ -7,11 +7,11 @@
 import pycurl
 import cStringIO
 import uuid
-import sys
+import sys, os
 import re
 import yaml
 import urllib
-import os
+import copy
 from optparse import OptionParser
 
 class CheckPyCurlOptions(object):
@@ -25,6 +25,7 @@ class CheckPyCurlOptions(object):
         self.insecure = False
         self.proxy = None
         self.postdata = None
+        self.failaterror = True
 
 
 class CheckPyCurlMulti(object):
@@ -40,7 +41,8 @@ class CheckPyCurlMulti(object):
     @staticmethod
     def rm_tmpfile():
         '''remove cookiejar file if it exists'''
-        if getattr(CheckPyCurlOptions, 'tmpfile', False) and os.path.exists(CheckPyCurlOptions.tmpfile):
+        if getattr(CheckPyCurlOptions, 'tmpfile', False) and \
+          os.path.exists(CheckPyCurlOptions.tmpfile):
             # print 'removing file'
             os.remove(CheckPyCurlOptions.tmpfile)
 
@@ -48,7 +50,7 @@ class CheckPyCurlMulti(object):
         '''parse runfile & create check objects'''
         with open(self.runfile) as f:
             runyaml = yaml.load(f)
-            # print runyaml
+        global_options = CheckPyCurlOptions()
         # set global prefs
         for global_opt in runyaml:
             if global_opt == 'cookiejar':
@@ -58,12 +60,12 @@ class CheckPyCurlMulti(object):
             elif global_opt == 'urls':
                 # loop round urls in object & create checkobjects
                 for url in runyaml['urls']:
-                    check_opt = CheckPyCurlOptions()
+                    local_options = copy.copy(global_options)
                     for opt in url:
-                        setattr(check_opt, opt, url[opt])
-                    self.checkobjs.append(check_opt)
+                        setattr(local_options, opt, url[opt])
+                    self.checkobjs.append(local_options)
             else:
-                setattr(CheckPyCurlOptions, global_opt, runyaml[global_opt])
+                setattr(global_options, global_opt, runyaml[global_opt])
 
     def check_runfile(self):
         '''run check objects'''
@@ -76,7 +78,7 @@ class CheckPyCurlMulti(object):
             cpc.results['stage'] = counter
             total_req_time += cpc.results['totaltime'] # store running total of req time
             cpc.results['totaltime'] = total_req_time
-            if rc != 0:
+            if rc != 0 and checkobj.failaterror:
                 self.rm_tmpfile()
                 return cpc
             # store regex match results for later use if available
