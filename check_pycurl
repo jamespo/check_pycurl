@@ -213,7 +213,7 @@ def main():
             cpc = a.check_runfile()
             rc = cpc.results['rc']
             if rc == 0:
-                rcstr = 'OK: All stages passed'
+                rcstr = 'OK: All stages passed (%s/%s)' % (len(a.checkobjs), len(a.checkobjs))
             else:
                 rcstr = 'CRITICAL: Stage %s - %s (should be %s)' % \
                 (cpc.results['stage'], cpc.results['status'], cpc.options.test)
