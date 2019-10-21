@@ -1,18 +1,20 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 
 # check_pycurl ; -*-Python-*-
-# Copyright James Powell 2013 / jamespo [at] gmail [dot] com
+# Copyright James Powell 2013-2019 / jamespo [at] gmail [dot] com
 # This program is distributed under the terms of the GNU General Public License v3
 
 import pycurl
 import cStringIO
 import uuid
-import sys, os
+import sys
+import os
 import re
 import yaml
 import urllib
 import copy
 from optparse import OptionParser
+
 
 class CheckPyCurlOptions(object):
     '''class to contain check options for multi-mode'''
@@ -26,12 +28,14 @@ class CheckPyCurlOptions(object):
         self.proxy = None
         self.postdata = None
         self.failaterror = True
+        self.user_agent = "curl/7.66.0"
 
 
 class CheckPyCurlMulti(object):
-    def __init__(self, runfile):
+    def __init__(self, runfile, debug=False):
         self.runfile = runfile
         self.checkobjs = []
+        self.debug = debug
 
     @staticmethod
     def tmpfile():
@@ -42,7 +46,7 @@ class CheckPyCurlMulti(object):
     def rm_tmpfile():
         '''remove cookiejar file if it exists'''
         if getattr(CheckPyCurlOptions, 'tmpfile', False) and \
-          os.path.exists(CheckPyCurlOptions.tmpfile):
+           os.path.exists(CheckPyCurlOptions.tmpfile):
             # print 'removing file'
             os.remove(CheckPyCurlOptions.tmpfile)
 
@@ -63,6 +67,7 @@ class CheckPyCurlMulti(object):
                     local_options = copy.copy(global_options)
                     for opt in url:
                         setattr(local_options, opt, url[opt])
+                    setattr(local_options, 'debug', self.debug)  # set debug if required
                     self.checkobjs.append(local_options)
             else:
                 setattr(global_options, global_opt, runyaml[global_opt])
@@ -76,7 +81,7 @@ class CheckPyCurlMulti(object):
             cpc = CheckPyCurl(options=checkobj, prev_matches=search_results)
             rc = cpc.curl()
             cpc.results['stage'] = counter
-            total_req_time += cpc.results['totaltime'] # store running total of req time
+            total_req_time += cpc.results['totaltime']  # store running total of req time
             cpc.results['totaltime'] = total_req_time
             if rc != 0 and checkobj.failaterror:
                 self.rm_tmpfile()
@@ -87,13 +92,16 @@ class CheckPyCurlMulti(object):
         self.rm_tmpfile()
         return cpc
 
+
 class CheckPyCurl(object):
-    def __init__(self, options, prev_matches = None):
+
+    def __init__(self, options, debug=False, prev_matches=None):
         if prev_matches is None:
             prev_matches = {}
         self.options = options
         self.results = dict()
         self.prev_matches = prev_matches
+        self.debug = debug
         (self.successtest, self.successcheck) = options.test.split(':')
 
     def create_curl_obj(self):
@@ -104,6 +112,7 @@ class CheckPyCurl(object):
         c.setopt(c.TIMEOUT, self.options.timeout)
         c.setopt(c.FOLLOWLOCATION, self.options.location)
         c.setopt(c.SSL_VERIFYPEER, self.options.insecure)
+        c.setopt(c.USERAGENT, self.options.user_agent)
         if getattr(self.options, 'cookiejar', False):
             c.setopt(pycurl.COOKIEJAR, self.options.tmpfile)
             c.setopt(pycurl.COOKIEFILE, self.options.tmpfile)
@@ -138,25 +147,26 @@ class CheckPyCurl(object):
         try:
             c.perform()
             self.content = buf.getvalue()
-            # print self.content
+            if self.options.debug:
+                print self.content
             self.results['rc'] = 0
             self.results['status'] = "%s returned HTTP %s" % (self.options.url,
-                                      c.getinfo(pycurl.HTTP_CODE))
+                                                              c.getinfo(pycurl.HTTP_CODE))
             # check results
             if self.successtest == 'code':
                 if int(self.successcheck) != int(c.getinfo(pycurl.HTTP_CODE)):
                     self.results['rc'] = 2
             elif self.successtest == 'regex':
                 search_res = re.search(self.successcheck, self.content, re.MULTILINE)
-                if  search_res is not None:
+                if search_res is not None:
                     self.results['status'] = "%s found in %s" % (self.successcheck,
-                                         self.options.url)
+                                                                 self.options.url)
                     self.results['rc'] = 0
                     # store match result for possible later use
                     self.results['search_res'] = search_res
                 else:
                     self.results['status'] = "%s not found in %s" % (self.successcheck,
-                                             self.options.url)
+                                                                     self.options.url)
                     self.results['rc'] = 2
             else:
                 self.results['rc'] = 1
@@ -169,6 +179,7 @@ class CheckPyCurl(object):
         self.results['totaltime'] = c.getinfo(pycurl.TOTAL_TIME)
         return self.results['rc']
 
+
 def checkargs(options):
     if options.url is None and options.runfile is None:
         # 3 is return code for unknown for NRPE plugin
@@ -176,6 +187,7 @@ def checkargs(options):
     # TODO: check if runfile exists
     else:
         return (0, '')
+
 
 def get_cli_options():
     '''get command line options & return OptionParser'''
@@ -191,9 +203,12 @@ def get_cli_options():
     parser.add_option("--proxy", dest="proxy")
     parser.add_option("--location", help="Follow redirects",
                       dest="location", action="store_true", default=False)
+    parser.add_option("--debug", help="turn on debug",
+                      dest="debug", action="store_true", default=False)
     parser.add_option("--insecure", dest="insecure", action="store_true",
                       default=False)
     return parser
+
 
 def main():
     parser = get_cli_options()
@@ -202,21 +217,22 @@ def main():
 
     if rc != 3:
         if options.url is not None:
-            cpc = CheckPyCurl(options)
+            cpc = CheckPyCurl(options, options.debug)
             rc = cpc.curl()
             rcstr = 'OK:' if rc == 0 else 'CRITICAL:'
             rcstr = rcstr + ' ' + cpc.results['status'] + " | request_time=" + str(cpc.results['totaltime'])
         else:
             # runfile
-            a = CheckPyCurlMulti(options.runfile)
+            a = CheckPyCurlMulti(options.runfile, options.debug)
             a.parse_runfile()
             cpc = a.check_runfile()
             rc = cpc.results['rc']
             if rc == 0:
                 rcstr = 'OK: All stages passed (%s/%s)' % (len(a.checkobjs), len(a.checkobjs))
             else:
-                rcstr = 'CRITICAL: Stage %s - %s (should be %s)' % \
-                (cpc.results['stage'], cpc.results['status'], cpc.options.test)
+                rcstr = 'CRITICAL: Stage %s [%s] - %s (should be %s)' % \
+                    (cpc.results['stage'], a.checkobjs[cpc.results['stage']].url,
+                     cpc.results['status'], cpc.options.test)
             rcstr += " | request_time=" + str(cpc.results['totaltime'])
     print rcstr
     sys.exit(rc)
