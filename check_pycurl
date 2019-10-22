@@ -29,6 +29,7 @@ class CheckPyCurlOptions(object):
         self.proxy = None
         self.postdata = None
         self.failaterror = True
+        self.debug = False
         self.user_agent = "curl/7.66.0"
 
 
@@ -54,7 +55,7 @@ class CheckPyCurlMulti(object):
     def parse_runfile(self):
         '''parse runfile & create check option objects'''
         with open(self.runfile) as f:
-            runyaml = yaml.load(f)
+            runyaml = yaml.safe_load(f)
         global_options = CheckPyCurlOptions()
         # set global prefs
         for global_opt in runyaml:
@@ -82,7 +83,7 @@ class CheckPyCurlMulti(object):
             cpc = CheckPyCurl(options=checkobj, prev_matches=search_results)
             rc = cpc.curl()
             cpc.results['stage'] = counter
-            total_req_time += cpc.results['totaltime']  # store running total of req time
+            total_req_time += cpc.results['totaltime']  # store running total of reqtime
             cpc.results['totaltime'] = total_req_time
             if rc != 0 and checkobj.failaterror:
                 self.rm_tmpfile()
@@ -96,13 +97,12 @@ class CheckPyCurlMulti(object):
 
 class CheckPyCurl(object):
 
-    def __init__(self, options, debug=False, prev_matches=None):
+    def __init__(self, options, prev_matches=None):
         if prev_matches is None:
             prev_matches = {}
         self.options = options
         self.results = dict()
         self.prev_matches = prev_matches
-        self.debug = debug
         (self.successtest, self.successcheck) = options.test.split(':')
 
     def create_curl_obj(self):
@@ -114,6 +114,7 @@ class CheckPyCurl(object):
         c.setopt(c.FOLLOWLOCATION, self.options.location)
         c.setopt(c.SSL_VERIFYPEER, self.options.insecure)
         c.setopt(c.USERAGENT, self.options.user_agent)
+        c.setopt(c.VERBOSE, self.options.debug)
         if getattr(self.options, 'cookiejar', False):
             c.setopt(pycurl.COOKIEJAR, self.options.tmpfile)
             c.setopt(pycurl.COOKIEFILE, self.options.tmpfile)
@@ -126,7 +127,7 @@ class CheckPyCurl(object):
             for item in self.options.postdata:
                 # post_params.append(tuple(item.split(':', 1)))
                 (postname, postdata) = item.split(':', 1)
-                # find if data is actually a lookup to previous match and if so substitute in
+                # is data actually a lookup to previous match and if so substitute in
                 check_postdata = re.match(r'PREV_MATCH_(\d+)_(\d+)$', postdata)
                 if check_postdata is not None:
                     (url_match_stage, url_match_num) = (int(check_postdata.group(1)),
@@ -148,11 +149,9 @@ class CheckPyCurl(object):
         try:
             c.perform()
             self.content = buf.getvalue()
-            if self.options.debug:
-                print self.content
             self.results['rc'] = 0
-            self.results['status'] = "%s returned HTTP %s" % (self.options.url,
-                                                              c.getinfo(pycurl.HTTP_CODE))
+            self.results['status'] = "%s returned HTTP %s" % \
+                (self.options.url, c.getinfo(pycurl.HTTP_CODE))
             # check results
             if self.successtest == 'code':
                 if int(self.successcheck) != int(c.getinfo(pycurl.HTTP_CODE)):
@@ -213,16 +212,17 @@ def get_cli_options():
 
 
 def main():
+    '''get options, do checks, return results'''
     parser = get_cli_options()
     (options, args) = parser.parse_args()
     (rc, rcstr) = checkargs(options)
-
     if rc != 3:
         if options.url is not None:
-            cpc = CheckPyCurl(options, options.debug)
+            cpc = CheckPyCurl(options)
             rc = cpc.curl()
             rcstr = 'OK:' if rc == 0 else 'CRITICAL:'
-            rcstr = rcstr + ' ' + cpc.results['status'] + " | request_time=" + str(cpc.results['totaltime'])
+            rcstr = rcstr + ' ' + cpc.results['status'] + " | request_time=" + \
+                str(cpc.results['totaltime'])
         else:
             # runfile
             a = CheckPyCurlMulti(options.runfile, options.debug)
@@ -230,7 +230,8 @@ def main():
             cpc = a.check_runfile()
             rc = cpc.results['rc']
             if rc == 0:
-                rcstr = 'OK: All stages passed (%s/%s)' % (len(a.checkoptobjs), len(a.checkoptobjs))
+                rcstr = 'OK: All stages passed (%s/%s)' % (len(a.checkoptobjs),
+                                                           len(a.checkoptobjs))
             else:
                 rcstr = 'CRITICAL: Stage %s [%s] - %s (should be %s)' % \
                     (cpc.results['stage'], a.checkoptobjs[cpc.results['stage']].url,
@@ -238,6 +239,7 @@ def main():
             rcstr += " | request_time=" + str(cpc.results['totaltime'])
     print rcstr
     sys.exit(rc)
+
 
 if __name__ == '__main__':
     main()
