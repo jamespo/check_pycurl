@@ -19,7 +19,8 @@ from optparse import OptionParser
 class CheckPyCurlOptions(object):
     '''class to contain check options for multi-mode'''
     def __init__(self):
-        # set defaults if not present (TODO: set these in one place)
+        '''set defaults if not present'''
+        # correlate to CLI params for single-use mode
         self.test = 'code:200'
         self.connecttimeout = 5
         self.timeout = 10
@@ -34,7 +35,7 @@ class CheckPyCurlOptions(object):
 class CheckPyCurlMulti(object):
     def __init__(self, runfile, debug=False):
         self.runfile = runfile
-        self.checkobjs = []
+        self.checkoptobjs = []
         self.debug = debug
 
     @staticmethod
@@ -51,7 +52,7 @@ class CheckPyCurlMulti(object):
             os.remove(CheckPyCurlOptions.tmpfile)
 
     def parse_runfile(self):
-        '''parse runfile & create check objects'''
+        '''parse runfile & create check option objects'''
         with open(self.runfile) as f:
             runyaml = yaml.load(f)
         global_options = CheckPyCurlOptions()
@@ -68,7 +69,7 @@ class CheckPyCurlMulti(object):
                     for opt in url:
                         setattr(local_options, opt, url[opt])
                     setattr(local_options, 'debug', self.debug)  # set debug if required
-                    self.checkobjs.append(local_options)
+                    self.checkoptobjs.append(local_options)
             else:
                 setattr(global_options, global_opt, runyaml[global_opt])
 
@@ -77,7 +78,7 @@ class CheckPyCurlMulti(object):
         cpc = None
         search_results = {}
         total_req_time = 0
-        for (counter, checkobj) in enumerate(self.checkobjs):
+        for (counter, checkobj) in enumerate(self.checkoptobjs):
             cpc = CheckPyCurl(options=checkobj, prev_matches=search_results)
             rc = cpc.curl()
             cpc.results['stage'] = counter
@@ -207,6 +208,7 @@ def get_cli_options():
                       dest="debug", action="store_true", default=False)
     parser.add_option("--insecure", dest="insecure", action="store_true",
                       default=False)
+    parser.add_option("--useragent", dest="user_agent", default="curl/7.66.0")
     return parser
 
 
@@ -228,10 +230,10 @@ def main():
             cpc = a.check_runfile()
             rc = cpc.results['rc']
             if rc == 0:
-                rcstr = 'OK: All stages passed (%s/%s)' % (len(a.checkobjs), len(a.checkobjs))
+                rcstr = 'OK: All stages passed (%s/%s)' % (len(a.checkoptobjs), len(a.checkoptobjs))
             else:
                 rcstr = 'CRITICAL: Stage %s [%s] - %s (should be %s)' % \
-                    (cpc.results['stage'], a.checkobjs[cpc.results['stage']].url,
+                    (cpc.results['stage'], a.checkoptobjs[cpc.results['stage']].url,
                      cpc.results['status'], cpc.options.test)
             rcstr += " | request_time=" + str(cpc.results['totaltime'])
     print rcstr
