@@ -122,7 +122,7 @@ class CheckPyCurl(object):
             c.setopt(c.PROXY, self.options.proxy)
         # if a POST, set up options
         if getattr(self.options, 'postdata', None) is not None:
-            post_params = []
+            post_params = {}
             # split out post param & value and append to postitems
             for item in self.options.postdata:
                 # post_params.append(tuple(item.split(':', 1)))
@@ -133,7 +133,9 @@ class CheckPyCurl(object):
                     (url_match_stage, url_match_num) = (int(check_postdata.group(1)),
                                                         int(check_postdata.group(2)))
                     postdata = self.prev_matches[url_match_stage].group(url_match_num)
-                post_params.append((postname, postdata))
+                post_params[postname] = postdata
+            if self.options.debug:
+                print "POST fields: %s" % str(post_params)
             resp_data = urllib.urlencode(post_params)
             c.setopt(pycurl.POSTFIELDS, resp_data)
             c.setopt(pycurl.POST, 1)
