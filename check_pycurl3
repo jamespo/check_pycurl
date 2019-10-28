@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+
+# check_pycurl ; -*-Python-*-
+# Copyright James Powell 2013-2019 / jamespo [at] gmail [dot] com
+# This program is distributed under the terms of the GNU General Public License v3
+
+import pycurl
+from io import BytesIO
+import uuid
+import sys
+import os
+import re
+import yaml
+import urllib
+import copy
+from optparse import OptionParser
+
+
+class CheckPyCurlOptions(object):
+    '''class to contain check options for multi-mode'''
+    def __init__(self):
+        '''set defaults if not present'''
+        # correlate to CLI params for single-use mode
+        self.test = 'code:200'
+        self.connecttimeout = 5
+        self.timeout = 10
+        self.location = False
+        self.insecure = False
+        self.proxy = None
+        self.postdata = None
+        self.failaterror = True
+        self.debug = False
+        self.user_agent = "curl/7.66.0"
+
+
+class CheckPyCurlMulti(object):
+    def __init__(self, runfile, debug=False):
+        self.runfile = runfile
+        self.checkoptobjs = []
+        self.debug = debug
+
+    @staticmethod
+    def tmpfile():
+        '''return temporary filename'''
+        return "%s%s" % ('/tmp/check_pycurl_', str(uuid.uuid4()))
+
+    @staticmethod
+    def rm_tmpfile():
+        '''remove cookiejar file if it exists'''
+        if getattr(CheckPyCurlOptions, 'tmpfile', False) and \
+           os.path.exists(CheckPyCurlOptions.tmpfile):
+            # print 'removing file'
+            os.remove(CheckPyCurlOptions.tmpfile)
+
+    def parse_runfile(self):
+        '''parse runfile & create check option objects'''
+        with open(self.runfile) as f:
+            runyaml = yaml.safe_load(f)
+        global_options = CheckPyCurlOptions()
+        # set global prefs
+        for global_opt in runyaml:
+            if global_opt == 'cookiejar':
+                if runyaml['cookiejar'] != 'no':
+                    CheckPyCurlOptions.tmpfile = self.tmpfile()
+                    CheckPyCurlOptions.cookiejar = True
+            elif global_opt == 'urls':
+                # loop round urls in object & create checkobjects
+                for url in runyaml['urls']:
+                    local_options = copy.copy(global_options)
+                    for opt in url:
+                        setattr(local_options, opt, url[opt])
+                    setattr(local_options, 'debug', self.debug)  # set debug if required
+                    self.checkoptobjs.append(local_options)
+            else:
+                setattr(global_options, global_opt, runyaml[global_opt])
+
+    def check_runfile(self):
+        '''run check objects'''
+        cpc = None
+        search_results = {}
+        total_req_time = 0
+        for (counter, checkobj) in enumerate(self.checkoptobjs):
+            cpc = CheckPyCurl(options=checkobj, prev_matches=search_results)
+            rc = cpc.curl()
+            cpc.results['stage'] = counter
+            total_req_time += cpc.results['totaltime']  # store running total of reqtime
+            cpc.results['totaltime'] = total_req_time
+            if rc != 0 and checkobj.failaterror:
+                self.rm_tmpfile()
+                return cpc
+            # store regex match results for later use if available
+            if cpc.results.get('search_res', None) is not None:
+                search_results[counter] = cpc.results['search_res']
+        self.rm_tmpfile()
+        return cpc
+
+
+class CheckPyCurl(object):
+
+    def __init__(self, options, prev_matches=None):
+        if prev_matches is None:
+            prev_matches = {}
+        self.options = options
+        self.results = dict()
+        self.prev_matches = prev_matches
+        (self.successtest, self.successcheck) = options.test.split(':')
+
+    def create_curl_obj(self):
+        '''create pycurl object & set options'''
+        c = pycurl.Curl()
+        c.setopt(c.URL, self.options.url)
+        c.setopt(c.CONNECTTIMEOUT, self.options.connecttimeout)
+        c.setopt(c.TIMEOUT, self.options.timeout)
+        c.setopt(c.FOLLOWLOCATION, self.options.location)
+        c.setopt(c.SSL_VERIFYPEER, self.options.insecure)
+        c.setopt(c.USERAGENT, self.options.user_agent)
+        c.setopt(c.VERBOSE, self.options.debug)
+        if getattr(self.options, 'cookiejar', False):
+            c.setopt(pycurl.COOKIEJAR, self.options.tmpfile)
+            c.setopt(pycurl.COOKIEFILE, self.options.tmpfile)
+        if self.options.proxy is not None:
+            c.setopt(c.PROXY, self.options.proxy)
+        # if a POST, set up options
+        if getattr(self.options, 'postdata', None) is not None:
+            post_params = {}
+            # split out post param & value and append to postitems
+            for item in self.options.postdata:
+                # post_params.append(tuple(item.split(':', 1)))
+                (postname, postdata) = item.split(':', 1)
+                # is data actually a lookup to previous match and if so substitute in
+                check_postdata = re.match(r'PREV_MATCH_(\d+)_(\d+)$', postdata)
+                if check_postdata is not None:
+                    (url_match_stage, url_match_num) = (int(check_postdata.group(1)),
+                                                        int(check_postdata.group(2)))
+                    postdata = self.prev_matches[url_match_stage].group(url_match_num)
+                post_params[postname] = postdata
+            if self.options.debug:
+                print("POST fields: %s" % str(post_params))
+            resp_data = urllib.urlencode(post_params)
+            c.setopt(pycurl.POSTFIELDS, resp_data)
+            c.setopt(pycurl.POST, 1)
+        return c
+
+    def curl(self):
+        '''make the request'''
+        buf = BytesIO()
+        # create object & set options
+        c = self.create_curl_obj()
+        c.setopt(c.WRITEFUNCTION, buf.write)
+        # send the request
+        try:
+            c.perform()
+            self.content = buf.getvalue()
+            self.results['rc'] = 0
+            self.results['status'] = "%s returned HTTP %s" % \
+                (self.options.url, c.getinfo(pycurl.HTTP_CODE))
+            # check results
+            if self.successtest == 'code':
+                if int(self.successcheck) != int(c.getinfo(pycurl.HTTP_CODE)):
+                    self.results['rc'] = 2
+            elif self.successtest == 'regex':
+                search_res = re.search(self.successcheck, self.content, re.MULTILINE)
+                if search_res is not None:
+                    self.results['status'] = "%s found in %s" % (self.successcheck,
+                                                                 self.options.url)
+                    self.results['rc'] = 0
+                    # store match result for possible later use
+                    self.results['search_res'] = search_res
+                else:
+                    self.results['status'] = "%s not found in %s" % (self.successcheck,
+                                                                     self.options.url)
+                    self.results['rc'] = 2
+            else:
+                self.results['rc'] = 1
+        except pycurl.error as excep:
+            self.results['rc'] = 2
+            self.results['status'] = excep[1]
+
+        buf.close()
+
+        self.results['totaltime'] = c.getinfo(pycurl.TOTAL_TIME)
+        return self.results['rc']
+
+
+def checkargs(options):
+    if options.url is None and options.runfile is None:
+        # 3 is return code for unknown for NRPE plugin
+        return (3, 'No URL / runfile supplied')
+    # TODO: check if runfile exists
+    else:
+        return (0, '')
+
+
+def get_cli_options():
+    '''get command line options & return OptionParser'''
+    parser = OptionParser()
+    parser.add_option("-u", "--url", dest="url")
+    parser.add_option("-f", "--runfile", dest="runfile")
+    parser.add_option("--test", dest="test",
+                      default="code:200", help="[code:HTTPCODE|regex:REGEX]")
+    parser.add_option("--connect-timeout", dest="connecttimeout",
+                      default=5)
+    parser.add_option("--timeout", dest="timeout",
+                      default=10)
+    parser.add_option("--proxy", dest="proxy")
+    parser.add_option("--location", help="Follow redirects",
+                      dest="location", action="store_true", default=False)
+    parser.add_option("--debug", help="turn on debug",
+                      dest="debug", action="store_true", default=False)
+    parser.add_option("--insecure", dest="insecure", action="store_true",
+                      default=False)
+    parser.add_option("--useragent", dest="user_agent", default="curl/7.66.0")
+    return parser
+
+
+def main():
+    '''get options, do checks, return results'''
+    parser = get_cli_options()
+    (options, args) = parser.parse_args()
+    (rc, rcstr) = checkargs(options)
+    if rc != 3:
+        if options.url is not None:
+            cpc = CheckPyCurl(options)
+            rc = cpc.curl()
+            rcstr = 'OK:' if rc == 0 else 'CRITICAL:'
+            rcstr = rcstr + ' ' + cpc.results['status'] + " | request_time=" + \
+                str(cpc.results['totaltime'])
+        else:
+            # runfile
+            a = CheckPyCurlMulti(options.runfile, options.debug)
+            a.parse_runfile()
+            cpc = a.check_runfile()
+            rc = cpc.results['rc']
+            if rc == 0:
+                rcstr = 'OK: All stages passed (%s/%s)' % (len(a.checkoptobjs),
+                                                           len(a.checkoptobjs))
+            else:
+                rcstr = 'CRITICAL: Stage %s [%s] - %s (should be %s)' % \
+                    (cpc.results['stage'], a.checkoptobjs[cpc.results['stage']].url,
+                     cpc.results['status'], cpc.options.test)
+            rcstr += " | request_time=" + str(cpc.results['totaltime'])
+    print(rcstr)
+    sys.exit(rc)
+
+
+if __name__ == '__main__':
+    main()

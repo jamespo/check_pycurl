@@ -10,14 +10,13 @@ Copyright James Powell 2013
 DEPENDENCIES
 
 python 2.x with modules:
-pycurl
+pycurl  (with TLS support)
 yaml
 
 
 INSTALLATION
 
-Just install the dependencies & copy the binary to your standard path for nagios plugins and
-configure in nagios (see NAGIOS CONFIGURATION).
+Just install the dependencies & copy the binary to your standard path for nagios plugins and configure in nagios/icinga (see SERVER CONFIGURATION).
 
 
 USAGE
@@ -35,9 +34,7 @@ Options:
   --location            Follow redirects
   --insecure
 
-check_pycurl can run in one of two ways, a simple one-off http check (specify the url with -u)
-or with a runfile which is written in yaml and can be used to specify multi-stage url checks (eg
-logging in then checking for success).
+check_pycurl can run in one of two ways, a simple one-off http check (specify the url with -u) or with a runfile which is written in yaml and can be used to specify multi-stage url checks (eg logging in then checking for success).
 
 By default check_pycurl will test for HTTP 200 code (--test code:200)
 
@@ -56,7 +53,7 @@ urls:
     test: code:301
 
 
-NAGIOS CONFIGURATION
+SERVER CONFIGURATION
 
 # simple configuration just for HTTP 200 check 
 define command {
