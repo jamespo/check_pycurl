@@ -1,5 +1,7 @@
 check_pycurl
 
+NOTE: this is now unmaintained - further development is on the Python 3 branch @ https://github.com/jamespo/check_pycurl3
+
 INTRODUCTION
 
 A nagios / icinga / shinken plugin to check HTTP requests
